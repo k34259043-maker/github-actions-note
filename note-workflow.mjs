@@ -16,7 +16,7 @@ const {
 
 
 /* ========================================
- * Claudeで記事生成
+ * Claudeで記事を生成
  * ======================================== */
 
 async function generateArticle() {
@@ -107,7 +107,7 @@ async function saveNoteDraft(title, body) {
   console.log('=== Note下書き保存開始 ===');
 
   /* ----------------------------------------
-   * note-state.json確認
+   * ログイン状態確認
    * ---------------------------------------- */
 
   if (!fs.existsSync(STATE_PATH)) {
@@ -130,53 +130,95 @@ async function saveNoteDraft(title, body) {
   try {
     const context = await browser.newContext({
       storageState: STATE_PATH,
-      locale: 'ja-JP',
+      viewport: {
+        width: 1440,
+        height: 1000,
+      },
     });
 
     const page = await context.newPage();
 
-    console.log('✓ Playwrightを起動しました');
-
 
     /* ----------------------------------------
-     * Note側APIエラー監視
+     * エラー監視
      * ---------------------------------------- */
 
-    const apiErrors = [];
+    const pageErrors = [];
+    const consoleErrors = [];
+    const requestFailures = [];
+    const httpErrors = [];
+
+    page.on('pageerror', error => {
+      const message = error.message || String(error);
+
+      pageErrors.push(message);
+
+      console.log(
+        'PAGE ERROR:',
+        message
+      );
+    });
+
+    page.on('console', message => {
+      if (message.type() === 'error') {
+        const text = message.text();
+
+        consoleErrors.push(text);
+
+        console.log(
+          'CONSOLE ERROR:',
+          text
+        );
+      }
+    });
+
+    page.on('requestfailed', request => {
+      const failure = request.failure();
+
+      const message =
+        `${request.method()} ${request.url()} :: ` +
+        `${failure?.errorText || 'unknown error'}`;
+
+      requestFailures.push(message);
+
+      console.log(
+        'REQUEST FAILED:',
+        message
+      );
+    });
 
     page.on('response', response => {
       const status = response.status();
       const url = response.url();
 
-      if (
-        status >= 400 &&
-        (
-          url.includes('/api/') ||
-          url.includes('/graphql')
-        )
-      ) {
-        const error = `${status} ${url}`;
+      if (status >= 400) {
+        const message =
+          `${status} ${url}`;
 
-        apiErrors.push(error);
+        httpErrors.push(message);
 
         console.log(
-          '❌ Note API ERROR:',
-          error
+          'HTTP ERROR:',
+          message
         );
       }
     });
 
 
     /* ----------------------------------------
-     * 新規記事作成ページへ
+     * Noteへアクセス
      * ---------------------------------------- */
 
     console.log(
-      'Note新規記事作成ページへ移動します...'
+      '✓ Playwrightを起動しました'
     );
 
-    await page.goto(
-      'https://note.com/notes/new',
+    console.log(
+      '=== Noteへアクセス開始 ==='
+    );
+
+    const response = await page.goto(
+      'https://editor.note.com/new',
       {
         waitUntil: 'domcontentloaded',
         timeout: 60000,
@@ -188,6 +230,13 @@ async function saveNoteDraft(title, body) {
       page.url()
     );
 
+    console.log(
+      'HTTPステータス:',
+      response
+        ? response.status()
+        : 'responseなし'
+    );
+
 
     /* ----------------------------------------
      * ログイン確認
@@ -195,7 +244,8 @@ async function saveNoteDraft(title, body) {
 
     if (page.url().includes('/login')) {
       throw new Error(
-        'Noteのログイン状態が無効です。note-state.jsonを確認してください。'
+        'Noteのログイン状態が無効です。' +
+        'note-state.jsonを確認してください。'
       );
     }
 
@@ -209,14 +259,13 @@ async function saveNoteDraft(title, body) {
      * ---------------------------------------- */
 
     console.log(
-      'Note編集画面の生成を待っています...'
+      '=== Note編集画面の生成を待っています ==='
     );
 
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(15000);
 
     console.log(
-      '10秒後のURL:',
-      page.url()
+      '✓ 15秒待機完了'
     );
 
 
@@ -224,65 +273,146 @@ async function saveNoteDraft(title, body) {
      * DOM調査
      * ---------------------------------------- */
 
-    console.log('');
-    console.log('=== Note編集画面DOM確認 ===');
-
     console.log(
-      'iframe:',
-      await page.locator('iframe').count()
+      '=== Note編集画面DOM調査開始 ==='
     );
+
+    const textareaCount =
+      await page.locator('textarea').count();
+
+    const titleTextareaCount =
+      await page.locator(
+        'textarea[placeholder="記事タイトル"]'
+      ).count();
+
+    const noteTitleCount =
+      await page.locator(
+        '[data-testid="note-title"]'
+      ).count();
+
+    const inputCount =
+      await page.locator('input').count();
+
+    const contenteditableCount =
+      await page.locator(
+        '[contenteditable="true"]'
+      ).count();
+
+    const iframeCount =
+      await page.locator('iframe').count();
 
     console.log(
       'textarea:',
-      await page.locator('textarea').count()
+      textareaCount
+    );
+
+    console.log(
+      '記事タイトルtextarea:',
+      titleTextareaCount
+    );
+
+    console.log(
+      'data-testid="note-title":',
+      noteTitleCount
     );
 
     console.log(
       'input:',
-      await page.locator('input').count()
+      inputCount
     );
 
     console.log(
       'contenteditable:',
-      await page.locator(
-        '[contenteditable="true"]'
-      ).count()
+      contenteditableCount
     );
 
     console.log(
-      'h1:',
-      await page.locator('h1').count()
+      'iframe:',
+      iframeCount
     );
-
-    console.log(
-      'role=textbox:',
-      await page.locator(
-        '[role="textbox"]'
-      ).count()
-    );
-
-    console.log('');
 
 
     /* ----------------------------------------
      * Body確認
      * ---------------------------------------- */
 
-    console.log('=== BODY TEXT ===');
-
-    const bodyText =
-      await page.locator('body').innerText();
-
     console.log(
-      bodyText.slice(0, 3000)
+      '=== Body確認 ==='
     );
 
-    console.log('');
+    try {
+      const bodyText =
+        await page.locator('body').innerText();
+
+      console.log(
+        bodyText.slice(0, 3000)
+      );
+    } catch (error) {
+      console.log(
+        'Body取得エラー:',
+        error.message
+      );
+    }
+
+
+    /* ----------------------------------------
+     * Frame確認
+     * ---------------------------------------- */
+
+    console.log(
+      '=== Frame確認 ==='
+    );
+
+    for (
+      const [i, frame]
+      of page.frames().entries()
+    ) {
+      console.log(
+        `FRAME ${i}:`
+      );
+
+      console.log(
+        '  URL:',
+        frame.url()
+      );
+
+      try {
+        console.log(
+          '  textarea:',
+          await frame.locator(
+            'textarea'
+          ).count()
+        );
+
+        console.log(
+          '  input:',
+          await frame.locator(
+            'input'
+          ).count()
+        );
+
+        console.log(
+          '  contenteditable:',
+          await frame.locator(
+            '[contenteditable="true"]'
+          ).count()
+        );
+      } catch (error) {
+        console.log(
+          '  Frame調査エラー:',
+          error.message
+        );
+      }
+    }
 
 
     /* ----------------------------------------
      * スクリーンショット
      * ---------------------------------------- */
+
+    console.log(
+      '=== スクリーンショット保存 ==='
+    );
 
     await page.screenshot({
       path: 'note-debug.png',
@@ -295,291 +425,234 @@ async function saveNoteDraft(title, body) {
 
 
     /* ----------------------------------------
-     * タイトル入力欄を探す
+     * HTML保存
      * ---------------------------------------- */
 
-    console.log('');
+    try {
+      const html =
+        await page.content();
+
+      fs.writeFileSync(
+        'note-debug.html',
+        html,
+        'utf8'
+      );
+
+      console.log(
+        '✓ note-debug.html を保存しました'
+      );
+    } catch (error) {
+      console.log(
+        'HTML保存エラー:',
+        error.message
+      );
+    }
+
+
+    /* ----------------------------------------
+     * エラー情報表示
+     * ---------------------------------------- */
+
     console.log(
-      '=== タイトル入力欄を検索 ==='
+      '=== エラー情報 ==='
     );
 
-    let titleInput = null;
+    console.log(
+      'Page Error:',
+      pageErrors.length
+    );
 
-    const titleSelectors = [
-      'textarea[placeholder*="記事タイトル"]',
-      'textarea[placeholder*="タイトル"]',
-
-      'input[placeholder*="記事タイトル"]',
-      'input[placeholder*="タイトル"]',
-
-      '[data-placeholder="タイトル"]',
-      '[data-placeholder*="タイトル"]',
-
-      '[data-testid="note-title"]',
-
-      '[aria-label*="タイトル"]',
-
-      'h1[contenteditable="true"]',
-
-      '[contenteditable="true"][aria-label*="タイトル"]',
-
-      '[role="textbox"][aria-label*="タイトル"]',
-    ];
-
-
-    /* ----------------------------------------
-     * 通常ページを検索
-     * ---------------------------------------- */
-
-    for (const selector of titleSelectors) {
-
+    for (const error of pageErrors) {
       console.log(
-        '検索:',
-        selector
+        '  ',
+        error
       );
+    }
 
-      const locator =
-        page.locator(selector).first();
+    console.log(
+      'Console Error:',
+      consoleErrors.length
+    );
 
-      if (
-        await locator.count() === 0
-      ) {
-        continue;
-      }
+    for (const error of consoleErrors) {
+      console.log(
+        '  ',
+        error
+      );
+    }
 
-      try {
+    console.log(
+      'Request Failure:',
+      requestFailures.length
+    );
 
-        await locator.waitFor({
-          state: 'visible',
-          timeout: 5000,
-        });
+    for (const error of requestFailures) {
+      console.log(
+        '  ',
+        error
+      );
+    }
 
-        titleInput = locator;
+    console.log(
+      'HTTP Error:',
+      httpErrors.length
+    );
 
-        console.log(
-          '✓ タイトル欄発見:',
-          selector
-        );
-
-        break;
-
-      } catch {
-        console.log(
-          '候補は存在しますが表示されていません:',
-          selector
-        );
-      }
+    for (const error of httpErrors) {
+      console.log(
+        '  ',
+        error
+      );
     }
 
 
     /* ----------------------------------------
-     * iframeを検索
+     * タイトル入力欄確認
+     *
+     * Chromeで確認したDOMでは
+     *
+     * textarea[placeholder="記事タイトル"]
+     *
+     * が存在する。
+     *
+     * まずこれを直接確認する。
      * ---------------------------------------- */
 
-    if (!titleInput) {
+    console.log(
+      '=== タイトル入力欄確認 ==='
+    );
 
-      console.log('');
-      console.log(
-        '通常ページにタイトル欄がありません'
-      );
+    const titleInput =
+      page.locator(
+        'textarea[placeholder="記事タイトル"]'
+      ).first();
 
-      console.log(
-        'iframe/frameを検索します'
-      );
+    const titleExists =
+      await titleInput.count();
 
-      for (
-        const [i, frame]
-        of page.frames().entries()
-      ) {
-
-        console.log(
-          `FRAME ${i}:`,
-          frame.url()
-        );
-
-        for (
-          const selector
-          of titleSelectors
-        ) {
-
-          const locator =
-            frame.locator(selector).first();
-
-          if (
-            await locator.count() === 0
-          ) {
-            continue;
-          }
-
-          try {
-
-            await locator.waitFor({
-              state: 'visible',
-              timeout: 5000,
-            });
-
-            titleInput = locator;
-
-            console.log(
-              '✓ iframe内タイトル欄発見:',
-              selector
-            );
-
-            break;
-
-          } catch {
-            console.log(
-              'iframe内にありますが表示されていません:',
-              selector
-            );
-          }
-        }
-
-        if (titleInput) {
-          break;
-        }
-      }
-    }
+    console.log(
+      '記事タイトル欄:',
+      titleExists
+    );
 
 
     /* ----------------------------------------
-     * タイトルが見つからない
+     * タイトル欄が存在しない場合
+     *
+     * ここで終了して、原因調査情報を残す。
+     * セレクタを無限に増やさない。
      * ---------------------------------------- */
 
-    if (!titleInput) {
-
-      console.log('');
+    if (titleExists === 0) {
       console.log(
-        '=== タイトル入力欄が見つかりません ==='
+        '=== タイトル入力欄が存在しません ==='
       );
 
-      if (apiErrors.length > 0) {
-
-        console.log(
-          '検出されたNote APIエラー:'
-        );
-
-        console.log(
-          apiErrors.join('\n')
-        );
-
-      } else {
-
-        console.log(
-          'Note APIエラーは検出されませんでした'
-        );
-
-      }
+      console.log(
+        'Note編集画面が正常に生成されていない可能性があります。'
+      );
 
       throw new Error(
-        'Noteのタイトル入力欄を見つけられませんでした。'
-        + ' Note編集画面が正常に生成されているか確認してください。'
+        'Noteの編集画面が正常に生成されていません。' +
+        'note-debug.png / note-debug.html / ' +
+        'Page Error / Console Error / HTTP Errorを確認してください。'
       );
     }
+
+
+    /* ----------------------------------------
+     * タイトル欄の表示待ち
+     * ---------------------------------------- */
+
+    await titleInput.waitFor({
+      state: 'visible',
+      timeout: 60000,
+    });
+
+    console.log(
+      '✓ タイトル入力欄を確認しました'
+    );
 
 
     /* ----------------------------------------
      * タイトル入力
      * ---------------------------------------- */
 
-    console.log(
-      'タイトルを入力します...'
-    );
-
     await titleInput.click();
 
     await titleInput.fill(title);
 
     console.log(
-      '✓ タイトルを入力しました:',
+      '✓ タイトルを入力しました'
+    );
+
+    console.log(
+      '入力タイトル:',
       title
     );
 
 
     /* ----------------------------------------
-     * 本文エディタを探す
+     * 本文エディタ確認
      * ---------------------------------------- */
 
-    console.log('');
     console.log(
-      '=== 本文エディタ検索 ==='
+      '=== 本文エディタ確認 ==='
     );
-
-    let editor = null;
 
     const editorSelectors = [
       '[contenteditable="true"]',
       '[role="textbox"]',
       '.ProseMirror',
       '[data-placeholder*="本文"]',
-      '[data-placeholder*="入力"]',
     ];
 
+    let editor = null;
 
     for (
-      const [i, frame]
-      of page.frames().entries()
+      const selector
+      of editorSelectors
     ) {
+      const locator =
+        page.locator(selector).first();
+
+      const count =
+        await locator.count();
 
       console.log(
-        `本文エディタ検索 FRAME ${i}`
+        `検索: ${selector} -> ${count}`
       );
 
-      for (
-        const selector
-        of editorSelectors
-      ) {
-
-        const locator =
-          frame.locator(selector).first();
-
-        if (
-          await locator.count() === 0
-        ) {
-          continue;
-        }
-
-        console.log(
-          '本文候補:',
-          selector
-        );
-
+      if (count > 0) {
         try {
-
           await locator.waitFor({
             state: 'visible',
-            timeout: 5000,
+            timeout: 10000,
           });
 
           editor = locator;
 
           console.log(
-            '✓ 本文エディタ発見:',
+            '✓ 本文エディタを発見:',
             selector
           );
 
           break;
-
         } catch {
           console.log(
-            '本文候補は存在しますが表示されていません:',
+            '存在しますが表示されていません:',
             selector
           );
         }
-      }
-
-      if (editor) {
-        break;
       }
     }
 
 
     /* ----------------------------------------
-     * 本文エディタがない
+     * 本文エディタが見つからない
      * ---------------------------------------- */
 
     if (!editor) {
-
       throw new Error(
         'Noteの本文エディタを見つけられませんでした。'
       );
@@ -589,10 +662,6 @@ async function saveNoteDraft(title, body) {
     /* ----------------------------------------
      * 本文入力
      * ---------------------------------------- */
-
-    console.log(
-      '本文を入力します...'
-    );
 
     await editor.click();
 
@@ -611,18 +680,26 @@ async function saveNoteDraft(title, body) {
       '下書き保存を待っています...'
     );
 
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(10000);
 
     console.log(
-      '✓ 下書き保存処理を待機しました'
+      '✓ 下書き保存処理を10秒待機しました'
     );
 
 
     /* ----------------------------------------
-     * 完了
+     * 最終スクリーンショット
      * ---------------------------------------- */
 
-    console.log('');
+    await page.screenshot({
+      path: 'note-draft-result.png',
+      fullPage: true,
+    });
+
+    console.log(
+      '✓ 最終スクリーンショットを保存しました'
+    );
+
     console.log(
       '========================================'
     );
@@ -636,9 +713,11 @@ async function saveNoteDraft(title, body) {
     );
 
   } finally {
-
     await browser.close();
 
+    console.log(
+      '✓ ブラウザを終了しました'
+    );
   }
 }
 
@@ -648,7 +727,6 @@ async function saveNoteDraft(title, body) {
  * ======================================== */
 
 (async () => {
-
   console.log(
     '=== Note Workflow 開始 ==='
   );
@@ -710,7 +788,6 @@ async function saveNoteDraft(title, body) {
    * ---------------------------------------- */
 
   if (DRY_RUN === 'true') {
-
     console.log(
       '✓ DRY_RUN=true のため、Noteには投稿しません'
     );
@@ -724,7 +801,7 @@ async function saveNoteDraft(title, body) {
 
 
   /* ----------------------------------------
-   * タイトルを記事本文から取得
+   * タイトル抽出
    * ---------------------------------------- */
 
   const lines = article
@@ -736,8 +813,7 @@ async function saveNoteDraft(title, body) {
 
 
   /*
-   * 「# タイトル」の次の行を
-   * 実際のタイトルとして取得
+   * 「# タイトル」の次の行をタイトルにする
    */
 
   const titleIndex =
@@ -746,12 +822,10 @@ async function saveNoteDraft(title, body) {
         /^#\s*タイトル\s*$/.test(line)
     );
 
-
   if (
     titleIndex !== -1 &&
     lines[titleIndex + 1]
   ) {
-
     title =
       lines[titleIndex + 1];
 
@@ -759,22 +833,21 @@ async function saveNoteDraft(title, body) {
 
     /*
      * 「# タイトル」がない場合
-     * 最初の見出しをタイトルとして使用
+     * 最初の見出しをタイトルにする
      */
 
     const firstHeading =
       lines.find(
-        line => /^#\s+/.test(line)
+        line =>
+          /^#\s+/.test(line)
       );
 
     if (firstHeading) {
-
       title =
         firstHeading.replace(
           /^#+\s*/,
           ''
         );
-
     }
   }
 
