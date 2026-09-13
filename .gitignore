@@ -3,3 +3,7 @@ note-state.json
 
 # Node.js
 node_modules/
+output/
+note-debug.html
+note-debug.png
+note-draft-result.png

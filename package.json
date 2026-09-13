@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node note-workflow.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "eval:compare": "node scripts/compare.mjs",
+    "report": "node scripts/report.mjs"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +16,8 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.270",
     "@anthropic-ai/sdk": "^0.125.0",
-    "playwright": "^1.55.1"
+    "diff": "9.0.0",
+    "playwright": "^1.55.1",
+    "promptfoo": "0.123.0"
   }
 }
