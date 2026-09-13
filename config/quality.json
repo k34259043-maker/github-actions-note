@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generationPrompt": "prompts/generate-v2.txt",
+  "generationPrompt": "prompts/generate-v3.txt",
   "judgePrompt": "prompts/judge-v1.txt",
   "generationModel": "claude-sonnet-4-5",
   "judgeModel": "claude-sonnet-4-5",

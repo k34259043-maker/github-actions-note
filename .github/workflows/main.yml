@@ -1,4 +1,4 @@
-name: Note Workflow
+name: Note Workflow (Current - Draft Only)
 
 on:
   workflow_dispatch:
@@ -70,10 +70,80 @@ jobs:
         env:
           NOTE_STATE_BASE64: ${{ secrets.NOTE_STATE_BASE64 }}
         run: |
-          if [ -n "$NOTE_STATE_BASE64" ]; then
-            umask 077
-            printf '%s' "$NOTE_STATE_BASE64" | base64 --decode > note-state.json
+          set -euo pipefail
+          fail_state() {
+            reason="$1"
+            message="$2"
+            echo "::error::$message"
+            echo "Run status: note_not_started"
+            echo "Note status: not_started"
+            echo "Note reason: $reason"
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              {
+                echo "## note保存結果"
+                echo
+                echo '- Run status: `note_not_started`'
+                echo '- Note status: `not_started`'
+                printf '%s\n' "- Note reason: \`$reason\`"
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 1
+          }
+
+          if [ -z "${NOTE_STATE_BASE64:-}" ]; then
+            fail_state "login_state_secret_missing" "NOTE_STATE_BASE64 is required when dry_run is false. Add a Playwright storage-state JSON secret and run again."
           fi
+
+          umask 077
+          state_file="note-state.json.tmp"
+          trap 'rm -f "$state_file"' EXIT
+          if ! printf '%s' "$NOTE_STATE_BASE64" | base64 --decode > "$state_file"; then
+            fail_state "login_state_invalid_base64" "NOTE_STATE_BASE64 is not valid base64."
+          fi
+
+          if ! NOTE_STATE_PATH="$state_file" node <<'NODE'
+          const { readFileSync } = require('node:fs');
+          const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+          const isNoteHost = value => {
+            try {
+              const hostname = value.includes('://') ? new URL(value).hostname : value.replace(/^\./, '');
+              return hostname === 'note.com' || hostname.endsWith('.note.com');
+            } catch {
+              return false;
+            }
+          };
+          try {
+            const state = JSON.parse(readFileSync(process.env.NOTE_STATE_PATH, 'utf8'));
+            const cookiesValid = Array.isArray(state?.cookies) && state.cookies.every(cookie => isRecord(cookie)
+              && typeof cookie.name === 'string' && cookie.name.length > 0
+              && typeof cookie.value === 'string'
+              && typeof cookie.domain === 'string' && cookie.domain.length > 0
+              && typeof cookie.path === 'string' && cookie.path.startsWith('/')
+              && Number.isFinite(cookie.expires)
+              && typeof cookie.httpOnly === 'boolean'
+              && typeof cookie.secure === 'boolean'
+              && ['Strict', 'Lax', 'None'].includes(cookie.sameSite));
+            const originsValid = Array.isArray(state?.origins) && state.origins.every(origin => isRecord(origin)
+              && typeof origin.origin === 'string' && URL.canParse(origin.origin)
+              && Array.isArray(origin.localStorage)
+              && origin.localStorage.every(item => isRecord(item)
+                && typeof item.name === 'string' && typeof item.value === 'string'));
+            const currentTime = Date.now() / 1000;
+            const hasNoteCredential = state.cookies?.some(cookie => isNoteHost(cookie.domain)
+                && cookie.value.length > 0 && (cookie.expires === -1 || cookie.expires > currentTime))
+              || state.origins?.some(origin => isNoteHost(origin.origin)
+                && origin.localStorage.some(item => item.value.length > 0));
+            if (!isRecord(state) || !cookiesValid || !originsValid || !hasNoteCredential) process.exit(1);
+          } catch {
+            process.exit(1);
+          }
+          NODE
+          then
+            fail_state "login_state_invalid_json_or_shape" "NOTE_STATE_BASE64 must decode to valid Playwright storage-state JSON containing nonempty, unexpired note.com state data."
+          fi
+
+          mv "$state_file" note-state.json
+          trap - EXIT
 
       - name: Run Note Workflow
         env:
@@ -88,6 +158,10 @@ jobs:
           REPORT_OUTPUT_DIR: output/runs
         run: node note-workflow.mjs
 
+      - name: Remove temporary login state
+        if: ${{ always() }}
+        run: rm -f note-state.json note-state.json.tmp
+
       - name: Upload evaluation and revision reports
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -95,7 +169,3 @@ jobs:
           name: note-review-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/runs/
           if-no-files-found: warn
-
-      - name: Remove temporary login state
-        if: ${{ always() }}
-        run: rm -f note-state.json

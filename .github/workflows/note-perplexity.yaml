@@ -1,4 +1,4 @@
-name: Note Workflow (Perplexity)
+name: Legacy Note Workflow - Perplexity (Can Publish)
 
 on:
   workflow_dispatch:
