@@ -1,0 +1,51 @@
+name: Compare note prompts
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "生成指示か評価器かを選択"
+        required: true
+        type: choice
+        options: [generation, judge]
+      cases:
+        description: "比較する事例JSONのリポジトリ内パス"
+        required: true
+        default: evals/cases.example.json
+      baseline:
+        description: "比較元のプロンプト全文ファイル"
+        required: true
+        default: prompts/generate-v2.txt
+      candidate:
+        description: "比較先の候補プロンプト全文ファイル"
+        required: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Compare recorded conditions
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          COMPARE_MODE: ${{ inputs.mode }}
+          COMPARE_CASES: ${{ inputs.cases }}
+          BASELINE_PROMPT: ${{ inputs.baseline }}
+          CANDIDATE_PROMPT: ${{ inputs.candidate }}
+        run: node scripts/compare.mjs --mode "$COMPARE_MODE" --cases "$COMPARE_CASES" --baseline "$BASELINE_PROMPT" --candidate "$CANDIDATE_PROMPT"
+      - name: Upload comparison records
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: note-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/runs/
+          if-no-files-found: warn

@@ -1,0 +1,19 @@
+{
+  "version": "1",
+  "generationPrompt": "prompts/generate-v2.txt",
+  "judgePrompt": "prompts/judge-v1.txt",
+  "generationModel": "claude-sonnet-4-5",
+  "judgeModel": "claude-sonnet-4-5",
+  "maxTokens": 5000,
+  "evaluationMaxTokens": 8000,
+  "requestTimeoutMs": 180000,
+  "research": { "enabled": true, "maxSearches": 3 },
+  "revision": { "enabled": true },
+  "promptCandidates": { "enabled": true, "autoAdopt": false },
+  "adoptionPolicy": {
+    "status": "undecided",
+    "tradeoffs": null,
+    "costLimit": null,
+    "timeLimitMs": null
+  }
+}

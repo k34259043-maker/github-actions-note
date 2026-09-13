@@ -1,0 +1,14 @@
+[
+  {
+    "id": "github-actions-beginner",
+    "purpose": "調整用の入力例。著者の実績は未提供。最終確認用データではない。",
+    "inputs": { "theme": "GitHub Actionsの活用方法", "target": "エンジニア初心者", "message": "自動化で生産性向上", "cta": "実際に試してみる", "tags": "GitHub,自動化,AI" },
+    "expectedChanges": ["入力にない著者の経験や成果倍率を創作しない", "手順の前提と成功の確認方法が分かる"]
+  },
+  {
+    "id": "ai-request-beginner",
+    "purpose": "別テーマへの悪化確認に使う入力例。実績・正解ラベルのデータではない。",
+    "inputs": { "theme": "AIに会議資料のたたき台を依頼する方法", "target": "AIを使い始めた会社員", "message": "資料を使う目的と完成の条件を先に伝える", "cta": "自分の仕事で依頼文を一つ作る", "tags": "AI,仕事,資料作成" },
+    "expectedChanges": ["具体的な依頼文と確認する点が分かる", "読者や著者の経験を根拠なく決めつけない"]
+  }
+]
