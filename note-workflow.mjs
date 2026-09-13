@@ -175,6 +175,28 @@ async function saveNoteDraft(title, body) {
 
     console.log('✓ Noteにログイン済みです');
 
+    await page.screenshot({
+  	path: 'note-debug.png',
+  	fullPage: true,
+    });
+
+    console.log('✓ Note編集画面のスクショを保存しました');
+ 
+    console.log(
+    	'textarea数:',
+ 	 await page.locator('textarea').count()
+    );
+
+    console.log(
+ 	'input数:',
+  	await page.locator('input').count()
+    );
+
+    console.log(
+        'contenteditable数:',
+    await page.locator('[contenteditable="true"]').count()
+    );
+
     // ページの読み込みを少し待つ
     await page.waitForTimeout(3000);
 
