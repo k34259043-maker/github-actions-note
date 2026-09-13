@@ -180,14 +180,21 @@ async function saveNoteDraft(title, body) {
 
     // タイトル入力欄を探す
     const titleInput = page.locator(
-      'input[placeholder*="タイトル"], textarea[placeholder*="タイトル"]'
+      'textarea[placeholder*="記事タイトル"], ' +
+      'textarea[placeholder*="タイトル"], ' +
+      'input[placeholder*="記事タイトル"], ' +
+      'input[placeholder*="タイトル"], ' +
+      '[data-placeholder="タイトル"], ' +
+      '[data-testid="note-title"], ' +
+      '[aria-label*="タイトル"]'
     ).first();
 
     await titleInput.waitFor({
       state: 'visible',
-      timeout: 30000,
+      timeout: 45000,
     });
 
+    await titleInput.click();
     await titleInput.fill(title);
 
     console.log('✓ タイトルを入力しました');
