@@ -40,6 +40,13 @@ on:
         options:
           - 'true'
           - 'false'
+push:
+  branches:
+    - main
+  paths:
+    - "note-workflow.mjs"
+    - "package.json"
+    - "package-lock.json"
 
 permissions:
   contents: read
