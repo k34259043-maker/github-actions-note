@@ -67,6 +67,7 @@ jobs:
 
       - name: Run Note Workflow
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           THEME: ${{ inputs.theme }}
           TARGET: ${{ inputs.target }}
           MESSAGE: ${{ inputs.message }}
