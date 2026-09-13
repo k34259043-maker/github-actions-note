@@ -128,9 +128,33 @@ async function saveNoteDraft(title, body) {
       );
     }
 
-    console.log('✓ Noteにログイン済みです');
+   console.log('✓ Noteにログイン済みです');
 
-    await page.waitForTimeout(5000);
+   console.log('編集画面の生成を待っています...');
+
+   await page.waitForTimeout(10000);
+
+   console.log('10秒後のDOM確認');
+
+   console.log(
+     'textarea:',
+     await page.locator('textarea').count()
+   );
+
+console.log(
+  'input:',
+  await page.locator('input').count()
+);
+
+console.log(
+  'contenteditable:',
+  await page.locator('[contenteditable="true"]').count()
+);
+
+console.log(
+  'body:',
+  (await page.locator('body').innerText()).slice(0, 2000)
+);
 
     console.log('=== Note編集画面調査開始 ===');
 
@@ -378,24 +402,38 @@ async function saveNoteDraft(title, body) {
     return;
   }
 
-  /*
-   * タイトルを記事本文から取得
-   */
+/*
+ * タイトルを記事本文から取得
+ */
 
-  const lines = article
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean);
+const lines = article
+  .split('\n')
+  .map(line => line.trim())
+  .filter(Boolean);
 
-  let title = lines[0] || 'AIで作る記事';
+let title = 'AIで作る記事';
 
-  if (title.startsWith('#')) {
-    title = title.replace(/^#+\s*/, '');
+// 「# タイトル」の次の行を実際のタイトルとして取得
+const titleIndex = lines.findIndex(
+  line => /^#\s*タイトル\s*$/.test(line)
+);
+
+if (titleIndex !== -1 && lines[titleIndex + 1]) {
+  title = lines[titleIndex + 1];
+} else {
+  // 「# タイトル」がない場合は最初の見出しをタイトルとして使用
+  const firstHeading = lines.find(
+    line => /^#\s+/.test(line)
+  );
+
+  if (firstHeading) {
+    title = firstHeading.replace(/^#+\s*/, '');
   }
+}
 
-  console.log('タイトル:', title);
+console.log('タイトル:', title);
 
-  await saveNoteDraft(title, article);
+await saveNoteDraft(title, article);
 
-  console.log('=== Note Workflow 成功 ===');
+console.log('=== Note Workflow 成功 ===');
 })();
