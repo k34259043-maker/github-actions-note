@@ -123,19 +123,30 @@ async function saveNoteDraft(title, body) {
    * ブラウザ起動
    * ---------------------------------------- */
 
-  const browser = await chromium.launch({
-    headless: true,
+const browser = await chromium.launch({
+  headless: true,
+});
+
+try {
+  const context = await browser.newContext({
+    storageState: STATE_PATH,
+
+    // GitHub ActionsのHeadlessChrome判定を避ける
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
+
+    locale: 'ja-JP',
+
+    viewport: {
+      width: 1440,
+      height: 1000,
+    },
+
+    permissions: [
+      'clipboard-read',
+      'clipboard-write',
+    ],
   });
-
-  try {
-    const context = await browser.newContext({
-      storageState: STATE_PATH,
-      viewport: {
-        width: 1440,
-        height: 1000,
-      },
-    });
-
     const page = await context.newPage();
 
 
