@@ -14,6 +14,10 @@ const {
   DRY_RUN,
 } = process.env;
 
+// ========================================
+// Claudeで記事生成
+// ========================================
+
 async function generateArticle() {
   console.log('=== Claudeで記事生成開始 ===');
 
@@ -83,13 +87,148 @@ ${TAGS}
     ],
   });
 
-  const article = response.content
+  return response.content
     .filter(item => item.type === 'text')
     .map(item => item.text)
     .join('\n');
-
-  return article;
 }
+
+// ========================================
+// Markdown記事をタイトルと本文に分離
+// ========================================
+
+function parseArticle(article) {
+  const lines = article.split('\n');
+
+  const titleIndex = lines.findIndex(line =>
+    line.trim().startsWith('# ')
+  );
+
+  if (titleIndex === -1) {
+    throw new Error('記事タイトルが見つかりません');
+  }
+
+  const title = lines[titleIndex]
+    .replace(/^#\s+/, '')
+    .trim();
+
+  const body = lines
+    .slice(titleIndex + 1)
+    .join('\n')
+    .trim();
+
+  if (!title) {
+    throw new Error('タイトルが空です');
+  }
+
+  if (!body) {
+    throw new Error('本文が空です');
+  }
+
+  return {
+    title,
+    body,
+  };
+}
+
+// ========================================
+// Noteへ下書き保存
+// ========================================
+
+async function saveNoteDraft(title, body) {
+  console.log('=== Note下書き保存開始 ===');
+
+  if (!fs.existsSync(STATE_PATH)) {
+    throw new Error(
+      `note-state.json が見つかりません: ${STATE_PATH}`
+    );
+  }
+
+  console.log('✓ note-state.json を確認しました');
+
+  const browser = await chromium.launch({
+    headless: true,
+  });
+
+  try {
+    const context = await browser.newContext({
+      storageState: STATE_PATH,
+    });
+
+    const page = await context.newPage();
+
+    console.log('✓ Playwrightを起動しました');
+
+    await page.goto('https://note.com/notes/new', {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
+
+    console.log('Note URL:', page.url());
+
+    // ログインページへ飛ばされた場合
+    if (page.url().includes('/login')) {
+      throw new Error(
+        'Noteのログイン状態が無効です。note-state.jsonを確認してください。'
+      );
+    }
+
+    console.log('✓ Noteにログイン済みです');
+
+    // ページの読み込みを少し待つ
+    await page.waitForTimeout(3000);
+
+    // タイトル入力欄を探す
+    const titleInput = page.locator(
+      'input[placeholder*="タイトル"], textarea[placeholder*="タイトル"]'
+    ).first();
+
+    await titleInput.waitFor({
+      state: 'visible',
+      timeout: 30000,
+    });
+
+    await titleInput.fill(title);
+
+    console.log('✓ タイトルを入力しました');
+
+    // 本文エディタを探す
+    const editor = page.locator(
+      '[contenteditable="true"]'
+    ).first();
+
+    await editor.waitFor({
+      state: 'visible',
+      timeout: 30000,
+    });
+
+    // Markdownをそのまま貼り付ける
+    await editor.click();
+
+    await page.keyboard.insertText(body);
+
+    console.log('✓ 本文を入力しました');
+
+    // 自動保存を待つ
+    console.log('下書き保存を待っています...');
+    await page.waitForTimeout(5000);
+
+    console.log('✓ 下書き保存処理を待機しました');
+
+    console.log('========================================');
+    console.log('Note下書き保存完了');
+    console.log('タイトル:', title);
+    console.log('URL:', page.url());
+    console.log('========================================');
+
+  } finally {
+    await browser.close();
+  }
+}
+
+// ========================================
+// メイン処理
+// ========================================
 
 (async () => {
   console.log('=== Note Workflow 開始 ===');
@@ -110,13 +249,21 @@ ${TAGS}
   console.log('========================================');
   console.log('');
 
-  // DRY_RUN=trueならここで終了
+  const { title, body } = parseArticle(article);
+
+  console.log('タイトル:', title);
+
+  // DRY_RUN=trueならNoteへアクセスしない
   if (DRY_RUN === 'true') {
-    console.log('✓ DRY_RUN=true のため、Noteには投稿しません');
+    console.log('');
+    console.log('✓ DRY_RUN=true');
+    console.log('✓ Noteには投稿しません');
     console.log('=== 記事生成テスト成功 ===');
     return;
   }
 
-  // Note投稿処理は次のステップで追加
-  console.log('Noteへの投稿処理はまだ実装していません。');
+  // Noteへ下書き保存
+  await saveNoteDraft(title, body);
+
+  console.log('=== Note Workflow 成功 ===');
 })();
