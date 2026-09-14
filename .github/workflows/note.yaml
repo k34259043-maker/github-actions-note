@@ -1,4 +1,4 @@
-name: Note Workflow
+name: Legacy Note Workflow (Can Publish)
 
 on:
   workflow_dispatch:

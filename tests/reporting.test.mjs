@@ -75,7 +75,21 @@ test('reports preserve full prompt lineage, machine differences, and unsafe text
   await run.append('article.created', { role: 'final', article: { id: 'A2', hash: 'h2', title: '自動化を始める', body: '修正した本文全部\n```yaml\nx: 2\n```' } });
   await run.append('evaluation.completed', { evaluation: { id: 'EV2', articleHash: 'h2', status: 'completed', axes: [{ id: 'Q1', score: 0, reason: 'まだ不十分' }, { id: 'Q2', score: null, reason: '評価不能' }], findings: [{ id: 'F1', issue: '根拠不足', quote: '元の引用', diagnosis: { cause: 'input', confidence: 'hypothesis' } }] } });
   await run.append('prompt.candidate', { status: 'unverified', before: { id: 'P1', hash: 'p1', template: '魅力的なタイトル\n維持する指示' }, after: { id: 'P2', hash: 'p2', template: '裏付けのあるタイトル\n維持する指示' }, changes: [{ id: 'PC1', operation: 'rewrite', before: '魅力的なタイトル', after: '裏付けのあるタイトル', findingIds: ['F1'], reason: '提供されていない実績を創作しない', expectedEffect: '未提供の倍率が使われない' }] });
-  await run.append('note.completed', { status: 'saved', published: false, articleHash: 'h2', verifiedHash: 'h2' });
+  await run.append('note.completed', {
+    status: 'saved', reason: 'isolated_context_readback_matched', published: false,
+    publishActionPerformed: false,
+    articleHash: 'h2', verifiedHash: 'h2', diagnostics: {
+      stage: 'verified', route: 'durable_editor',
+      articleValidation: { bodyCanonical: true, hashMatched: true },
+      selectorCandidates: { editor: { title: 1, body: 1 }, verification: { title: 1, body: 1 } },
+      saveControl: {
+        found: true, visible: true, enabled: true, clicked: true,
+        savingObserved: true, readyObservedAfterSaving: true,
+      },
+      settleMode: 'explicit_save', settleElapsedMs: 1500,
+    },
+    verification: { method: 'isolated_context_readback', titleMatched: true, bodyMatched: true },
+  });
   await run.append('run.completed', {});
   const first = await writeReports(run.dir);
   const second = await writeReports(run.dir);
@@ -86,7 +100,8 @@ test('reports preserve full prompt lineage, machine differences, and unsafe text
   assert.ok(markdown.includes('0円とは扱いません'));
   assert.match(markdown, /Q1 \| 0/);
   assert.match(markdown, /Q2 \| 評価不能/);
-  assert.ok(first.summary.includes('保存確認ハッシュは対象原稿と一致'));
+  assert.ok(first.summary.includes('記録された保存ハッシュは対象原稿と一致'));
+  assert.ok(first.summary.includes('保存確認済み'));
   assert.ok(first.summary.includes('未採用・判断待ち'));
   assert.equal((first.summary.match(/^\| /gm) ?? []).length, 7); // header, separator, five overview rows
   assert.ok(html.includes('&lt;script&gt;alert('));
@@ -109,6 +124,97 @@ test('failed and incomplete runs do not appear successful or receive invented sc
   assert.ok(report.summary.includes('問題の有無は未確認'));
   assert.ok(report.summary.includes('noteへの入力・保存・公開は未確認'));
   assert.ok(!report.summary.includes('0点'));
+});
+
+test('article reports expose safe note failure diagnostics without presenting input as saved', async (t) => {
+  const run = await fixture(t);
+  const article = { id: 'A-input', hash: 'input-hash', title: '入力確認', body: '記事本文' };
+  await run.append('article.created', { role: 'final', article });
+  await run.append('note.completed', {
+    status: 'input_only',
+    reason: 'editor_input_mismatch',
+    articleHash: article.hash,
+    verifiedHash: null,
+    published: 'unknown',
+    diagnostics: {
+      stage: 'editor_input_mismatch',
+      route: 'new_editor',
+      articleValidation: { bodyCanonical: true, hashMatched: true },
+      selectorCandidates: { editor: { title: 1, body: 1 }, verification: null },
+      saveControl: {
+        found: false, visible: false, enabled: false, clicked: false,
+        savingObserved: false, readyObservedAfterSaving: false,
+      },
+      settleMode: null,
+      input: {
+        title: { matched: true, classification: 'exact_match_after_documented_transport', firstDifference: null },
+        body: { matched: false, classification: 'content_or_structure_mismatch', firstDifference: 12 },
+      },
+      readback: null,
+    },
+    verification: null,
+  });
+  await run.append('run.completed', { status: 'note_input_incomplete', exitCode: 1 });
+
+  const report = await writeReports(run.dir);
+  const text = await readFile(report.markdownPath, 'utf8');
+  assert.ok(report.summary.includes('入力処理開始・保存未確認（status: input_only）'));
+  assert.ok(report.summary.includes('理由：editor_input_mismatch'));
+  assert.ok(report.summary.includes('診断段階：editor_input_mismatch'));
+  assert.ok(report.summary.includes('検証方法：未取得・未確認'));
+  assert.ok(!report.summary.includes('保存確認済み'));
+  const noteSection = text.split('## noteへの入力・保存確認')[1].split('## 後日の判断・次回への引き継ぎ')[0];
+  assert.ok(noteSection.includes('入力処理開始・保存未確認'));
+  assert.ok(noteSection.includes('editor_input_mismatch'));
+  assert.ok(noteSection.includes('content_or_structure_mismatch'));
+  assert.ok(noteSection.includes('bodyCanonical'));
+  assert.ok(noteSection.includes('検出した入力欄候補数'));
+  assert.ok(noteSection.includes('savingObserved'));
+  assert.ok(noteSection.includes('readyObservedAfterSaving'));
+  assert.ok(!noteSection.includes('saveAcknowledgementSeen'));
+  assert.ok(!noteSection.includes('markdownHardBreakMarkersRemoved'));
+  assert.ok(noteSection.includes('対象原稿とのハッシュ一致 | 未取得・未確認'));
+  assert.ok(noteSection.includes('隔離コンテキストでの再読込確認 | 未取得・未確認'));
+  assert.ok(noteSection.includes('保存済みと判定しません'));
+  assert.ok(!noteSection.includes('保存確認済み'));
+});
+
+test('matching saved hashes without isolated readback metadata remain unconfirmed', async (t) => {
+  const run = await fixture(t);
+  const article = { id: 'A-saved', hash: 'saved-hash', title: '保存確認', body: '記事本文' };
+  await run.append('article.created', { role: 'final', article });
+  await run.append('note.completed', {
+    status: 'saved',
+    reason: 'isolated_context_readback_matched',
+    articleHash: article.hash,
+    verifiedHash: article.hash,
+    published: false,
+  });
+  await run.append('run.completed', { status: 'completed', exitCode: 0 });
+
+  const report = await writeReports(run.dir);
+  const text = await readFile(report.markdownPath, 'utf8');
+  assert.ok(report.summary.includes('結果：保存状態未確認（status: saved）'));
+  assert.ok(report.summary.includes('記録された保存ハッシュは対象原稿と一致'));
+  assert.ok(!report.summary.includes('保存確認済み'));
+  const noteSection = text.split('## noteへの入力・保存確認')[1].split('## 後日の判断・次回への引き継ぎ')[0];
+  assert.ok(noteSection.includes('対象原稿とのハッシュ一致 | はい'));
+  assert.ok(noteSection.includes('隔離コンテキストでの再読込確認 | 未取得・未確認'));
+  assert.ok(noteSection.includes('隔離したブラウザーコンテキスト'));
+  assert.ok(!noteSection.includes('保存確認済み'));
+});
+
+test('note failure summary rejects unrestricted private error text', async (t) => {
+  const run = await fixture(t);
+  const privateError = 'private browser detail\narticle fragment and credential-like text';
+  await run.append('note.failed', { error: privateError });
+  await run.append('run.completed', { status: 'note_not_started', exitCode: 1 });
+
+  const report = await writeReports(run.dir);
+  assert.ok(report.summary.includes('note処理失敗：未取得・未確認'));
+  assert.ok(!report.summary.includes(privateError));
+  assert.ok(!report.summary.includes('private browser detail'));
+  assert.ok(!report.summary.includes('article fragment'));
 });
 
 test('late adoption only affects reports at or after its recorded time', async (t) => {

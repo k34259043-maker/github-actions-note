@@ -1,5 +1,6 @@
 # 機密情報
 note-state.json
+note-state.json.tmp
 
 # Node.js
 node_modules/

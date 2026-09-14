@@ -16,6 +16,11 @@ const settings=()=>({...structuredClone(configBase),research:{enabled:false,maxS
 const axisData=quote=>['Q1','Q2','Q3','Q4'].map(id=>({id,score:3,reason:'必要な説明がある',quote}));
 const evaluated=(article=draft)=>({axes:axisData(article.body),findings:[],claims:[],preserve:[],unknowns:[]});
 const response=data=>({model:'claude-sonnet-4-5',content:[{type:'text',text:JSON.stringify(data)}],stop_reason:'end_turn',usage:{input_tokens:10,output_tokens:20}});
+const verifiedSave=article=>({status:'saved',reason:'isolated_context_readback_matched',articleId:article.id,
+  articleHash:article.hash,verifiedHash:article.hash,published:'unknown',publishActionPerformed:false,
+  publicationVerified:false,publicationReason:'no_publish_action_performed_status_unverified',
+  diagnostics:{stage:'verified',route:'durable_editor'},
+  verification:{method:'isolated_context_readback',titleMatched:true,bodyMatched:true}});
 function fakeClient(queue) {
   const calls=[];
   return {calls,messages:{async create(request){calls.push(structuredClone(request));if(!queue.length)throw new Error('Unexpected model call');const next=queue.shift();if(next instanceof Error)throw next;return typeof next==='function'?next(request):next;}}};
@@ -54,7 +59,7 @@ test('truncated generation fails with usage and report preserved, never saves pa
 test('judge API failure stays unknown while one-click draft creation continues',async t=>{
   const outputDir=await temporary(t),client=fakeClient([response(draft),new Error('Judge unavailable')]);
   let saved;
-  const result=await runWorkflow({inputs,config:settings(),client,outputDir,dryRun:false,saveDraft:async a=>{saved=a;return {status:'saved',articleHash:a.hash,verifiedHash:a.hash,published:'unknown'};}});
+  const result=await runWorkflow({inputs,config:settings(),client,outputDir,dryRun:false,saveDraft:async a=>{saved=a;return verifiedSave(a);}});
   assert.equal(result.status,'completed_with_evaluation_warning');assert.equal(result.evaluation.status,'failed');
   assert.equal(result.article.hash,saved.hash);assert.equal(client.calls.length,2);
   const {events}=await readRun(result.runDir);assert.ok(events.some(e=>e.type==='evaluation.failed'));
@@ -66,7 +71,7 @@ test('source-backed targeted revision saves exactly the reevaluated final articl
   const review={resolutions:[{findingId:'F1',status:'resolved',beforeQuote:finding.quote,afterQuote:'',reason:'未提供の実績を削除した'}],regressions:[],lostContent:[],unrequestedChanges:[],newClaims:[],unknowns:[]};
   const client=fakeClient([response(before),response(first),response(draft),response(evaluated()),response(review)]);
   let saved;
-  const result=await runWorkflow({inputs,config:settings(),client,outputDir,dryRun:false,saveDraft:async a=>{saved=a;return {status:'saved',articleHash:a.hash,verifiedHash:a.hash,published:'unknown'};}});
+  const result=await runWorkflow({inputs,config:settings(),client,outputDir,dryRun:false,saveDraft:async a=>{saved=a;return verifiedSave(a);}});
   assert.equal(result.exitCode,0);assert.equal(result.article.body,draft.body);assert.equal(client.calls.length,5);
   assert.equal(result.article.hash,result.evaluation.articleHash);assert.equal(saved.hash,result.article.hash);
   const {events}=await readRun(result.runDir);
@@ -77,8 +82,91 @@ test('source-backed targeted revision saves exactly the reevaluated final articl
 test('saved status without matching verification hashes cannot become workflow success',async t=>{
   const result=await runWorkflow({inputs,config:settings(),client:fakeClient([response(draft),response(evaluated())]),outputDir:await temporary(t),dryRun:false,
     saveDraft:async()=>({status:'saved',articleHash:'different',verifiedHash:'different',published:'unknown'})});
-  assert.equal(result.exitCode,1);assert.equal(result.note.status,'save_unconfirmed');assert.equal(result.note.verifiedHash,null);
+  assert.equal(result.exitCode,1);assert.equal(result.status,'save_unconfirmed');assert.equal(result.note.status,'save_unconfirmed');assert.equal(result.note.verifiedHash,null);
 });
+
+test('matching hashes without isolated title and body readback cannot become workflow success',async t=>{
+  const result=await runWorkflow({inputs,config:settings(),client:fakeClient([response(draft),response(evaluated())]),outputDir:await temporary(t),dryRun:false,
+    saveDraft:async article=>({status:'saved',reason:'isolated_context_readback_matched',articleHash:article.hash,verifiedHash:article.hash,
+      published:'unknown',publishActionPerformed:false,diagnostics:{stage:'verified'},
+      verification:{method:'fresh_page_same_context',titleMatched:true,bodyMatched:true}})});
+  assert.equal(result.exitCode,1);assert.equal(result.status,'save_unconfirmed');
+  assert.equal(result.note.reason,'verification_proof_missing_or_invalid');assert.equal(result.note.verifiedHash,null);
+});
+
+for (const [label, mutate] of [
+  ['verified reason', note => { delete note.reason; }],
+  ['verified stage', note => { delete note.diagnostics.stage; }],
+  ['no-publish action proof', note => { delete note.publishActionPerformed; }],
+]) {
+  test(`saved result without ${label} is downgraded`, async t => {
+    const result=await runWorkflow({inputs,config:settings(),client:fakeClient([response(draft),response(evaluated())]),
+      outputDir:await temporary(t),dryRun:false,saveDraft:async article=>{const note=verifiedSave(article);mutate(note);return note;}});
+    assert.equal(result.exitCode,1);
+    assert.equal(result.status,'save_unconfirmed');
+    assert.equal(result.note.status,'save_unconfirmed');
+    assert.equal(result.note.reason,'verification_proof_missing_or_invalid');
+  });
+}
+
+test('private editor URLs and arbitrary saver fields never enter artifacts or reports', async t => {
+  const privateDraft='https://editor.note.com/notes/private-draft-id/edit?token=private-token';
+  const privateError='private browser exception and article fragment';
+  const result=await runWorkflow({inputs,config:settings(),client:fakeClient([response(draft),response(evaluated())]),
+    outputDir:await temporary(t),dryRun:false,saveDraft:async article=>({
+      ...verifiedSave(article),url:privateDraft,error:privateError,
+      diagnostics:{...verifiedSave(article).diagnostics,privateUrl:privateDraft,rawEditorText:privateError},
+    })});
+  assert.equal(result.exitCode,0);
+  const {events}=await readRun(result.runDir);
+  const serialized=JSON.stringify(events);
+  const markdown=await readFile(result.report.markdownPath,'utf8');
+  const html=await readFile(result.report.htmlPath,'utf8');
+  for(const output of [serialized,markdown,html]){
+    assert.equal(output.includes('private-draft-id'),false);
+    assert.equal(output.includes('private-token'),false);
+    assert.equal(output.includes(privateError),false);
+  }
+});
+
+test('unexpected saver exceptions remain save-unconfirmed and do not record raw exception text',async t=>{
+  const result=await runWorkflow({inputs,config:settings(),client:fakeClient([response(draft),response(evaluated())]),outputDir:await temporary(t),dryRun:false,
+    saveDraft:async()=>{throw new Error('private URL and article text must not be recorded');}});
+  assert.equal(result.exitCode,1);assert.equal(result.status,'save_unconfirmed');assert.equal(result.note.status,'save_unconfirmed');
+  assert.equal(result.note.reason,'note_save_exception');
+  const {events}=await readRun(result.runDir),failure=events.find(event=>event.type==='note.failed');
+  assert.deepEqual(failure.data,{reason:'note_save_exception',stage:'unknown_after_save_started'});
+  assert.ok(!(await readFile(result.report.markdownPath,'utf8')).includes('private URL and article text'));
+});
+
+for (const [noteStatus, runStatus, reason] of [
+  ['not_started', 'note_not_started', 'login_required'],
+  ['input_only', 'note_input_incomplete', 'editor_input_mismatch'],
+  ['save_unconfirmed', 'save_unconfirmed', 'draft_readback_mismatch'],
+]) {
+  test(`run status preserves the note save stage for ${noteStatus}`, async t => {
+    const result = await runWorkflow({
+      inputs,
+      config: settings(),
+      client: fakeClient([response(draft), response(evaluated())]),
+      outputDir: await temporary(t),
+      dryRun: false,
+      noteStatePath: '/tmp/specific-note-state.json',
+      saveDraft: async (article, options) => {
+        assert.equal(options.statePath, '/tmp/specific-note-state.json');
+        return { status: noteStatus, reason, articleHash: article.hash, verifiedHash: null, published: 'unknown' };
+      },
+    });
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.status, runStatus);
+    assert.equal(result.note.status, noteStatus);
+    const { events } = await readRun(result.runDir);
+    const completion = events.find(event => event.type === 'run.completed');
+    assert.equal(completion.data.status, runStatus);
+    assert.equal(completion.data.noteStatus, noteStatus);
+    assert.equal(completion.data.noteReason, reason);
+  });
+}
 
 test('factual support needs real source or exact provided author claim, and quotes must exist',()=>{
   const article=makeArticle({...draft,body:finding.quote});
